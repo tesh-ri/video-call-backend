@@ -9,9 +9,15 @@ app.use(cors());
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: '*',
+    origin: 'https://video-call-frontend-two.vercel.app',
   },
 });
+app.get("/",(req, res)=>{
+    res.json({
+        date:new Date(),
+        msg:"server is up"
+    })
+})
 
 const rooms = {}; // track room users
 
