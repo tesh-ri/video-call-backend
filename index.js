@@ -1,44 +1,64 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
+const socketIo = require('socket.io');
+const cors = require('cors');
 
 const app = express();
+app.use(cors());
+
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = socketIo(server, {
   cors: {
     origin: '*',
-  }
+  },
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
+const rooms = {}; // track room users
 
-// Signaling logic
-io.on('connection', socket => {
-  console.log('a user connected: ' + socket.id);
+io.on('connection', (socket) => {
+  console.log('🟢 New connection:', socket.id);
 
   socket.on('join', (roomId) => {
     socket.join(roomId);
-    socket.to(roomId).emit('user-joined', socket.id);
+    if (!rooms[roomId]) rooms[roomId] = new Set();
+    rooms[roomId].add(socket.id);
+
+    const otherUsers = Array.from(rooms[roomId]).filter(id => id !== socket.id);
+    if (otherUsers.length > 0) {
+      // notify new user about one peer
+      socket.emit('user-joined', otherUsers[0], rooms[roomId].size);
+    }
+
+    // update everyone in the room about the new count
+    io.to(roomId).emit('update-user-count', rooms[roomId].size);
   });
 
-  socket.on('offer', ({ offer, to }) => {
-    io.to(to).emit('offer', { offer, from: socket.id });
+  socket.on('offer', (data) => {
+    io.to(data.to).emit('offer', { offer: data.offer, from: socket.id });
   });
 
-  socket.on('answer', ({ answer, to }) => {
-    io.to(to).emit('answer', { answer, from: socket.id });
+  socket.on('answer', (data) => {
+    io.to(data.to).emit('answer', { answer: data.answer });
   });
 
-  socket.on('ice-candidate', ({ candidate, to }) => {
-    io.to(to).emit('ice-candidate', { candidate, from: socket.id });
+  socket.on('ice-candidate', (data) => {
+    io.to(data.to).emit('ice-candidate', { candidate: data.candidate });
   });
 
-  socket.on('disconnect', () => {
-    console.log('user disconnected: ' + socket.id);
+  socket.on('disconnecting', () => {
+    for (const roomId of socket.rooms) {
+      if (rooms[roomId]) {
+        rooms[roomId].delete(socket.id);
+        if (rooms[roomId].size === 0) {
+          delete rooms[roomId];
+        } else {
+          socket.to(roomId).emit('user-left', rooms[roomId].size);
+        }
+      }
+    }
   });
 });
 
-const PORT = 3000;
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+server.listen(8000, () => {
+  console.log('✅ Server started on port 8000');
+});
